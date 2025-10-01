@@ -4,6 +4,8 @@ import numpy as np
 from collections import deque
 import time
 
+invert_cam = False  # toggle state
+
 # Mediapipe setup
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
@@ -17,9 +19,6 @@ face_mesh = mp_face_mesh.FaceMesh(
 # Camera
 cap = cv2.VideoCapture(0)
 w, h = int(cap.get(3)), int(cap.get(4))
-
-# Heatmap canvas
-heatmap = np.zeros((h//2, w//2, 3), dtype=np.uint8)
 
 # Rolling buffer for smoothing
 smooth_buffer = deque(maxlen=5)
@@ -88,8 +87,14 @@ while True:
     ret, frame = cap.read()
     if not ret:
         break
+
+    if invert_cam:
+        frame = cv2.flip(frame, 1)
+    
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
+
+    
 
     if results.multi_face_landmarks:
         face_landmarks = results.multi_face_landmarks[0]
@@ -138,6 +143,9 @@ while True:
     cv2.imshow("Eye Tracking", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+    elif cv2.waitKey(1) & 0xFF == ord('i'):  # toggle camera inversion
+        invert_cam = not invert_cam
+        print("Camera inversion:", "ON" if invert_cam else "OFF")
 
 cap.release()
 cv2.destroyAllWindows()
