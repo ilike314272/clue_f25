@@ -1,6 +1,7 @@
 # cluely_f25
 
-Press i to invert camera
+## Face tracking program. Works FOR ALL ANGLES!
 
-1. Face tracking
-2. Heatmap for data visualization
+`q` to quit camera capture. Tracks horizontal and vertical direction. 
+
+`python eye_track.py`
