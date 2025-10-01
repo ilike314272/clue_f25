@@ -17,7 +17,7 @@ face_mesh = mp_face_mesh.FaceMesh(
 
 # Camera
 cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)   # lower res = faster
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)   # faster processing
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 w, h = int(cap.get(3)), int(cap.get(4))
 
@@ -46,7 +46,6 @@ def classify_direction(vec, lm, iw, ih, yaw_thresh=12, pitch_thresh=5):
     elif pitch < -pitch_thresh:
         vert = "UP"
     else:
-        # Fallback landmark heuristic
         nose_y = lm[1].y * ih
         eye_avg_y = ((lm[33].y + lm[263].y) / 2.0) * ih
         offset = eye_avg_y - nose_y
@@ -97,7 +96,6 @@ while True:
         ih, iw, _ = frame.shape
         lm = face_landmarks.landmark
 
-        # Reuse array instead of creating new every loop
         image_points = np.array([
             (lm[1].x*iw, lm[1].y*ih),
             (lm[152].x*iw, lm[152].y*ih),
@@ -118,13 +116,14 @@ while True:
             angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
             yaw, pitch = angles[1]*180, angles[0]*180
 
-            # ✅ Fix inversion bug: flip yaw back if camera flipped
+            # Fix inversion bug: flip yaw if camera inverted
             if invert_cam:
                 yaw = -yaw
 
             vec = smooth_vector((yaw, pitch))
             horiz, vert = classify_direction(vec, lm, iw, ih)
 
+            # --- Draw direction text ---
             cv2.putText(frame, f"yaw:{vec[0]:.1f} pitch:{vec[1]:.1f}", (30,h-90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
             cv2.putText(frame, f"Horizontal: {horiz}", (30,h-60),
@@ -135,9 +134,23 @@ while True:
             cv2.line(frame, nose, gaze_end, (0,0,255), 2)
             cv2.circle(frame, nose, 3, (0,255,0), -1)
 
+            # --- Tracker bars ---
+            # normalize yaw (-40 to +40 deg → 0..1)
+            yaw_norm = np.clip((vec[0] + 40) / 80, 0, 1)
+            pitch_norm = np.clip((vec[1] + 40) / 80, 0, 1)
+
+            # Horizontal bar (bottom)
+            bar_x = int(yaw_norm * (w-20))  # leave margin
+            cv2.circle(frame, (bar_x, h-10), 8, (0,255,255), -1)
+            cv2.line(frame, (10,h-10), (w-10,h-10), (100,100,100), 2)
+
+            # Vertical bar (right side)
+            bar_y = int(pitch_norm * (h-20))
+            cv2.circle(frame, (w-10, bar_y), 8, (0,255,0), -1)
+            cv2.line(frame, (w-10,10), (w-10,h-10), (100,100,100), 2)
+
     cv2.imshow("Eye Tracking", frame)
 
-    # ✅ only call waitKey once
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
         break
