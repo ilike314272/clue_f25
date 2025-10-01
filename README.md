@@ -4,4 +4,5 @@
 
 `i` to invert camera, `q` to quit camera capture. Tracks horizontal and vertical direction. 
 
+`pip install -r requirements.txt`
 `python eye_track.py`

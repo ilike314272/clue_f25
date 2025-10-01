@@ -2,7 +2,6 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from collections import deque
-import time
 
 invert_cam = False  # toggle state
 
@@ -18,10 +17,12 @@ face_mesh = mp_face_mesh.FaceMesh(
 
 # Camera
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)   # lower res = faster
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 w, h = int(cap.get(3)), int(cap.get(4))
 
 # Rolling buffer for smoothing
-smooth_buffer = deque(maxlen=5)
+smooth_buffer = deque(maxlen=3)
 
 def smooth_vector(new_vec):
     smooth_buffer.append(new_vec)
@@ -39,16 +40,13 @@ def classify_direction(vec, lm, iw, ih, yaw_thresh=12, pitch_thresh=5):
         horiz = "CENTER"
 
     # Vertical
-    # Flip pitch sign (camera coords differ from head coords)
-    pitch = -pitch  
-
-    # Use smaller thresholds
+    pitch = -pitch  # invert sign (camera coords differ)
     if pitch > pitch_thresh:
         vert = "DOWN"
     elif pitch < -pitch_thresh:
         vert = "UP"
     else:
-        # fallback on landmark-based offset if pitch is small
+        # Fallback landmark heuristic
         nose_y = lm[1].y * ih
         eye_avg_y = ((lm[33].y + lm[263].y) / 2.0) * ih
         offset = eye_avg_y - nose_y
@@ -61,7 +59,7 @@ def classify_direction(vec, lm, iw, ih, yaw_thresh=12, pitch_thresh=5):
 
     return horiz, vert
 
-# 3D model points (rough facial landmarks for head pose)
+# 3D model points
 model_points = np.array([
     (0.0, 0.0, 0.0),             # Nose tip
     (0.0, -330.0, -65.0),        # Chin
@@ -71,7 +69,7 @@ model_points = np.array([
     (150.0, -150.0, -125.0)      # Right mouth corner
 ], dtype=np.float64)
 
-# Camera intrinsics (approximation)
+# Camera intrinsics
 focal_length = w
 center = (w/2, h/2)
 cam_mtx = np.array([
@@ -81,7 +79,7 @@ cam_mtx = np.array([
 ], dtype=np.float64)
 dist_coeffs = np.zeros((4,1))
 
-print("🔥 Eye tracking started. Press 'q' to quit.")
+print("🔥 Eye tracking started. Press 'q' to quit, 'i' to toggle camera inversion.")
 
 while True:
     ret, frame = cap.read()
@@ -90,45 +88,43 @@ while True:
 
     if invert_cam:
         frame = cv2.flip(frame, 1)
-    
+
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
 
-    
-
     if results.multi_face_landmarks:
         face_landmarks = results.multi_face_landmarks[0]
-
-        # Extract needed 2D landmarks
         ih, iw, _ = frame.shape
         lm = face_landmarks.landmark
 
+        # Reuse array instead of creating new every loop
         image_points = np.array([
-            (lm[1].x*iw, lm[1].y*ih),     # Nose tip
-            (lm[152].x*iw, lm[152].y*ih), # Chin
-            (lm[33].x*iw, lm[33].y*ih),   # Left eye left corner
-            (lm[263].x*iw, lm[263].y*ih), # Right eye right corner
-            (lm[61].x*iw, lm[61].y*ih),   # Left mouth corner
-            (lm[291].x*iw, lm[291].y*ih)  # Right mouth corner
+            (lm[1].x*iw, lm[1].y*ih),
+            (lm[152].x*iw, lm[152].y*ih),
+            (lm[33].x*iw, lm[33].y*ih),
+            (lm[263].x*iw, lm[263].y*ih),
+            (lm[61].x*iw, lm[61].y*ih),
+            (lm[291].x*iw, lm[291].y*ih)
         ], dtype=np.float64)
 
         success, rvec, tvec = cv2.solvePnP(model_points, image_points, cam_mtx, dist_coeffs)
 
         if success:
-            # Project gaze forward
             nose = (int(image_points[0][0]), int(image_points[0][1]))
             gaze_end, _ = cv2.projectPoints(np.array([(0,0,1000.0)]), rvec, tvec, cam_mtx, dist_coeffs)
             gaze_end = (int(gaze_end[0][0][0]), int(gaze_end[0][0][1]))
 
-            # Vector (yaw, pitch approx from rvec)
             rmat, _ = cv2.Rodrigues(rvec)
             angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
             yaw, pitch = angles[1]*180, angles[0]*180
 
+            # ✅ Fix inversion bug: flip yaw back if camera flipped
+            if invert_cam:
+                yaw = -yaw
+
             vec = smooth_vector((yaw, pitch))
             horiz, vert = classify_direction(vec, lm, iw, ih)
 
-            # Draw text output
             cv2.putText(frame, f"yaw:{vec[0]:.1f} pitch:{vec[1]:.1f}", (30,h-90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
             cv2.putText(frame, f"Horizontal: {horiz}", (30,h-60),
@@ -136,14 +132,16 @@ while True:
             cv2.putText(frame, f"Vertical:   {vert}", (30,h-30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
 
-            # Draw vector
             cv2.line(frame, nose, gaze_end, (0,0,255), 2)
             cv2.circle(frame, nose, 3, (0,255,0), -1)
 
     cv2.imshow("Eye Tracking", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+
+    # ✅ only call waitKey once
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
         break
-    elif cv2.waitKey(1) & 0xFF == ord('i'):  # toggle camera inversion
+    elif key == ord('i'):
         invert_cam = not invert_cam
         print("Camera inversion:", "ON" if invert_cam else "OFF")
 
